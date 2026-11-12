@@ -542,6 +542,13 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
     if(create){setMessage('تم إنشاء الحساب. تحقق من بريدك ثم سجّل الدخول.');}
     else {setMessage('تم تسجيل الدخول. جارٍ استعادة آخر نسخة سحابية...');await downloadCloud();}
   };
+  const resendConfirmation=async()=>{
+    const client=cloudClient();
+    if(!client)return setMessage('أدخل إعدادات Supabase أولاً.');
+    if(!email)return setMessage('أدخل البريد الإلكتروني أولاً.');
+    setCloudBusy(true);const result=await client.auth.resend({type:'signup',email,options:{emailRedirectTo:'https://mouzae-halawiyat.pages.dev/'}});setCloudBusy(false);
+    setMessage(result.error?'تعذر إرسال الرسالة: '+result.error.message:'تم إرسال رسالة تأكيد جديدة. افتح أحدث رسالة فقط.');
+  };
   const uploadCloud=async()=>{
     const client=cloudClient();
     if(!client)return setMessage('أدخل إعدادات Supabase أولاً.');
@@ -611,6 +618,7 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
         <button disabled={cloudBusy} onClick={()=>signIn(false)} style={S.greenBtn}>تسجيل الدخول</button>
         <button disabled={cloudBusy} onClick={()=>signIn(true)} style={S.editBtn}>إنشاء حساب</button>
       </div>
+      <button disabled={cloudBusy} onClick={resendConfirmation} style={{...S.editBtn,width:'100%',marginTop:'8px'}}>✉️ إعادة إرسال رسالة التأكيد</button>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'7px',marginTop:'8px'}}>
         <button disabled={cloudBusy} onClick={uploadCloud} style={S.saveBtn}>⬆️ رفع البيانات</button>
         <button disabled={cloudBusy} onClick={downloadCloud} style={{...S.saveBtn,background:'#2563eb'}}>⬇️ استعادة البيانات</button>
