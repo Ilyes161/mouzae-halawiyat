@@ -523,6 +523,8 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
   const [email,setEmail]=useState('');
   const [password,setPassword]=useState('');
   const [cloudBusy,setCloudBusy]=useState(false);
+  const [session,setSession]=useState(null);
+  const [syncReady,setSyncReady]=useState(false);
   const saveBusiness=()=>{saveSettings(business);setMessage('تم حفظ بيانات النشاط.');};
   const cloudClient=()=>{
     if(!cloudUrl||!cloudKey||!window.supabase)return null;
@@ -540,7 +542,7 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
     if(result.error)return setMessage('تعذر الاتصال: '+result.error.message);
     cloudSettings();
     if(create){setMessage('تم إنشاء الحساب. تحقق من بريدك ثم سجّل الدخول.');}
-    else {setMessage('تم تسجيل الدخول. جارٍ استعادة آخر نسخة سحابية...');await downloadCloud();}
+    else {setMessage('تم تسجيل الدخول. جارٍ استعادة آخر نسخة سحابية تلقائيًا...');}
   };
   const resendConfirmation=async()=>{
     const client=cloudClient();
@@ -549,15 +551,15 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
     setCloudBusy(true);const result=await client.auth.resend({type:'signup',email,options:{emailRedirectTo:'https://mouzae-halawiyat.pages.dev/'}});setCloudBusy(false);
     setMessage(result.error?'تعذر إرسال الرسالة: '+result.error.message:'تم إرسال رسالة تأكيد جديدة. افتح أحدث رسالة فقط.');
   };
-  const uploadCloud=async()=>{
+  const uploadCloud=async(silent=false)=>{
     const client=cloudClient();
     if(!client)return setMessage('أدخل إعدادات Supabase أولاً.');
     setCloudBusy(true);const {data:{user}}=await client.auth.getUser();
     if(!user){setCloudBusy(false);return setMessage('سجّل الدخول أولاً.');}
     const {error}=await client.from('app_states').upsert({user_id:user.id,payload:cloudPayload(),updated_at:new Date().toISOString()});
-    setCloudBusy(false);setMessage(error?'فشل رفع البيانات: '+error.message:'تم رفع نسخة البيانات إلى السحابة.');
+    setCloudBusy(false);if(!silent)setMessage(error?'فشل رفع البيانات: '+error.message:'تم رفع نسخة البيانات إلى السحابة.');
   };
-  const downloadCloud=async()=>{
+  const downloadCloud=async(silent=false)=>{
     const client=cloudClient();
     if(!client)return setMessage('أدخل إعدادات Supabase أولاً.');
     setCloudBusy(true);const {data:{user}}=await client.auth.getUser();
@@ -566,10 +568,21 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
     setCloudBusy(false);
     if(error)return setMessage('فشل تنزيل البيانات: '+error.message);
     if(!data?.payload)return setMessage('لا توجد نسخة سحابية بعد.');
-    if(!window.confirm('سيتم استبدال البيانات المحلية بالنسخة السحابية. هل تريد المتابعة؟'))return;
+    if(!silent&&!window.confirm('سيتم استبدال البيانات المحلية بالنسخة السحابية. هل تريد المتابعة؟'))return;
     const payload=data.payload;
     saveProducts(Array.isArray(payload.products)?payload.products:[]);saveSuppliers(Array.isArray(payload.suppliers)?payload.suppliers:[]);saveClients(Array.isArray(payload.clients)?payload.clients:[]);savePurchases(Array.isArray(payload.purchases)?payload.purchases:[]);saveSales(Array.isArray(payload.sales)?payload.sales:[]);savePayments(Array.isArray(payload.payments)?payload.payments:[]);saveExpenses(Array.isArray(payload.expenses)?payload.expenses:[]);setMessage('تمت استعادة البيانات من السحابة.');
   };
+  useEffect(()=>{
+    const client=cloudClient();if(!client)return;
+    client.auth.getSession().then(async({data})=>{if(data.session){setSession(data.session);await downloadCloud(true);}setSyncReady(true);});
+    const {data}=client.auth.onAuthStateChange((event,next)=>{setSession(next);if(event==='SIGNED_IN'&&next){downloadCloud(true).finally(()=>setSyncReady(true));}if(event==='SIGNED_OUT')setSyncReady(false);});
+    return ()=>data.subscription.unsubscribe();
+  },[]);
+  useEffect(()=>{
+    if(!session||!syncReady)return;
+    const timer=setTimeout(()=>uploadCloud(true),1200);
+    return ()=>clearTimeout(timer);
+  },[session,syncReady,products,suppliers,clients,purchases,sales,payments,expenses,settings]);
   const exportData=()=>{
     const data={version:1,exportedAt:new Date().toISOString(),products,suppliers,clients,purchases,sales,payments,expenses,settings};
     const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
@@ -609,9 +622,7 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
     </div>
     <div style={{...S.formCard,padding:'18px'}}>
       <div style={{fontWeight:'900',color:'#1a2340',fontSize:'1rem',marginBottom:'6px'}}>☁️ المزامنة السحابية</div>
-      <div style={{fontSize:'0.72rem',color:'#5a6a8a',lineHeight:1.8,marginBottom:'10px'}}>ضع Project URL وPublishable key من Supabase. لا تستخدم service_role key هنا.</div>
-      <Field label="Supabase Project URL" value={cloudUrl} onChange={setCloudUrl} placeholder="https://xxxx.supabase.co"/>
-      <Field label="Publishable key" value={cloudKey} onChange={setCloudKey} placeholder="sb_publishable_..."/>
+      <div style={{fontSize:'0.72rem',color:'#5a6a8a',lineHeight:1.8,marginBottom:'10px'}}>الاتصال السحابي مضبوط تلقائيًا. بيانات الاتصال مخفية ومحفوظة داخل التطبيق.</div>
       <Field label="البريد الإلكتروني" value={email} onChange={setEmail} type="email" placeholder="you@example.com"/>
       <Field label="كلمة المرور" value={password} onChange={setPassword} type="password" placeholder="••••••••"/>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'7px'}}>
@@ -710,7 +721,7 @@ function App(){
       {tab==='sales'&&<Sales {...shared}/>}
       {tab==='contacts'&&<Contacts {...shared}/>}
       {tab==='expenses'&&<Expenses {...shared}/>}
-      {tab==='backup'&&<Backup {...shared}/>}
+      <div style={{display:tab==='backup'?'block':'none'}}><Backup {...shared}/></div>
     </div>
 
     {/* BOTTOM NAV */}
