@@ -535,7 +535,7 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
     if(!client)return setMessage('أدخل رابط Supabase والمفتاح العام أولاً.');
     if(!email||!password)return setMessage('أدخل البريد الإلكتروني وكلمة المرور.');
     setCloudBusy(true);setMessage('جارٍ الاتصال بالسحابة...');
-    const result=create?await client.auth.signUp({email,password}):await client.auth.signInWithPassword({email,password});
+    const result=create?await client.auth.signUp({email,password,options:{emailRedirectTo:'https://mouzae-halawiyat.pages.dev/'}}):await client.auth.signInWithPassword({email,password});
     setCloudBusy(false);
     if(result.error)return setMessage('تعذر الاتصال: '+result.error.message);
     cloudSettings();
