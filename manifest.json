@@ -1,0 +1,22 @@
+{
+  "name": "موزع الحلويات",
+  "short_name": "موزع الحلويات",
+  "description": "نظام محلي لإدارة توزيع الحلويات والمبيعات والديون",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f6fb",
+  "theme_color": "#1a2340",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+
