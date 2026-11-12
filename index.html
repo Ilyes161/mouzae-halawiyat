@@ -16,6 +16,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 body{margin:0;padding:0;background:#f4f6fb;font-family:'Cairo',sans-serif;direction:rtl;}
@@ -515,7 +516,49 @@ function Expenses({expenses,saveExpenses}){
 function Backup({products,suppliers,clients,purchases,sales,payments,expenses,settings,saveProducts,saveSuppliers,saveClients,savePurchases,saveSales,savePayments,saveExpenses,saveSettings}){
   const [message,setMessage]=useState('');
   const [business,setBusiness]=useState(settings);
+  const [cloudUrl,setCloudUrl]=useState(settings.cloudUrl||'');
+  const [cloudKey,setCloudKey]=useState(settings.cloudKey||'');
+  const [email,setEmail]=useState('');
+  const [password,setPassword]=useState('');
+  const [cloudBusy,setCloudBusy]=useState(false);
   const saveBusiness=()=>{saveSettings(business);setMessage('تم حفظ بيانات النشاط.');};
+  const cloudClient=()=>{
+    if(!cloudUrl||!cloudKey||!window.supabase)return null;
+    return window.supabase.createClient(cloudUrl.trim().replace(/\/$/,''),cloudKey.trim());
+  };
+  const cloudSettings=()=>{const next={...business,cloudUrl:cloudUrl.trim(),cloudKey:cloudKey.trim()};setBusiness(next);saveSettings(next);return next;};
+  const cloudPayload=()=>({products,suppliers,clients,purchases,sales,payments,expenses,settings:{...business,cloudUrl:cloudUrl.trim(),cloudKey:cloudKey.trim()}});
+  const signIn=async(create=false)=>{
+    const client=cloudClient();
+    if(!client)return setMessage('أدخل رابط Supabase والمفتاح العام أولاً.');
+    if(!email||!password)return setMessage('أدخل البريد الإلكتروني وكلمة المرور.');
+    setCloudBusy(true);setMessage('جارٍ الاتصال بالسحابة...');
+    const result=create?await client.auth.signUp({email,password}):await client.auth.signInWithPassword({email,password});
+    setCloudBusy(false);
+    if(result.error)return setMessage('تعذر الاتصال: '+result.error.message);
+    cloudSettings();setMessage(create?'تم إنشاء الحساب. تحقق من بريدك إن طلب Supabase ذلك.':'تم تسجيل الدخول بنجاح.');
+  };
+  const uploadCloud=async()=>{
+    const client=cloudClient();
+    if(!client)return setMessage('أدخل إعدادات Supabase أولاً.');
+    setCloudBusy(true);const {data:{user}}=await client.auth.getUser();
+    if(!user){setCloudBusy(false);return setMessage('سجّل الدخول أولاً.');}
+    const {error}=await client.from('app_states').upsert({user_id:user.id,payload:cloudPayload(),updated_at:new Date().toISOString()});
+    setCloudBusy(false);setMessage(error?'فشل رفع البيانات: '+error.message:'تم رفع نسخة البيانات إلى السحابة.');
+  };
+  const downloadCloud=async()=>{
+    const client=cloudClient();
+    if(!client)return setMessage('أدخل إعدادات Supabase أولاً.');
+    setCloudBusy(true);const {data:{user}}=await client.auth.getUser();
+    if(!user){setCloudBusy(false);return setMessage('سجّل الدخول أولاً.');}
+    const {data,error}=await client.from('app_states').select('payload').eq('user_id',user.id).maybeSingle();
+    setCloudBusy(false);
+    if(error)return setMessage('فشل تنزيل البيانات: '+error.message);
+    if(!data?.payload)return setMessage('لا توجد نسخة سحابية بعد.');
+    if(!window.confirm('سيتم استبدال البيانات المحلية بالنسخة السحابية. هل تريد المتابعة؟'))return;
+    const payload=data.payload;
+    saveProducts(Array.isArray(payload.products)?payload.products:[]);saveSuppliers(Array.isArray(payload.suppliers)?payload.suppliers:[]);saveClients(Array.isArray(payload.clients)?payload.clients:[]);savePurchases(Array.isArray(payload.purchases)?payload.purchases:[]);saveSales(Array.isArray(payload.sales)?payload.sales:[]);savePayments(Array.isArray(payload.payments)?payload.payments:[]);saveExpenses(Array.isArray(payload.expenses)?payload.expenses:[]);setMessage('تمت استعادة البيانات من السحابة.');
+  };
   const exportData=()=>{
     const data={version:1,exportedAt:new Date().toISOString(),products,suppliers,clients,purchases,sales,payments,expenses,settings};
     const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
@@ -552,6 +595,22 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
       <Field label="اسم النشاط أو اسمك" value={business.businessName||''} onChange={v=>setBusiness({...business,businessName:v})} placeholder="يظهر في الفواتير"/>
       <Field label="رقم الهاتف" value={business.phone||''} onChange={v=>setBusiness({...business,phone:v})} type="tel" placeholder="05xxxxxxxx"/>
       <button onClick={saveBusiness} style={S.saveBtn}>💾 حفظ الإعدادات</button>
+    </div>
+    <div style={{...S.formCard,padding:'18px'}}>
+      <div style={{fontWeight:'900',color:'#1a2340',fontSize:'1rem',marginBottom:'6px'}}>☁️ المزامنة السحابية</div>
+      <div style={{fontSize:'0.72rem',color:'#5a6a8a',lineHeight:1.8,marginBottom:'10px'}}>ضع Project URL وPublishable key من Supabase. لا تستخدم service_role key هنا.</div>
+      <Field label="Supabase Project URL" value={cloudUrl} onChange={setCloudUrl} placeholder="https://xxxx.supabase.co"/>
+      <Field label="Publishable key" value={cloudKey} onChange={setCloudKey} placeholder="sb_publishable_..."/>
+      <Field label="البريد الإلكتروني" value={email} onChange={setEmail} type="email" placeholder="you@example.com"/>
+      <Field label="كلمة المرور" value={password} onChange={setPassword} type="password" placeholder="••••••••"/>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'7px'}}>
+        <button disabled={cloudBusy} onClick={()=>signIn(false)} style={S.greenBtn}>تسجيل الدخول</button>
+        <button disabled={cloudBusy} onClick={()=>signIn(true)} style={S.editBtn}>إنشاء حساب</button>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'7px',marginTop:'8px'}}>
+        <button disabled={cloudBusy} onClick={uploadCloud} style={S.saveBtn}>⬆️ رفع البيانات</button>
+        <button disabled={cloudBusy} onClick={downloadCloud} style={{...S.saveBtn,background:'#2563eb'}}>⬇️ استعادة البيانات</button>
+      </div>
     </div>
     <div style={{...S.formCard,padding:'18px'}}>
       <div style={{fontWeight:'900',color:'#1a2340',fontSize:'1rem',marginBottom:'6px'}}>💾 النسخ الاحتياطي</div>
