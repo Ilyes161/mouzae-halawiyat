@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="110" fill="#1a2340"/>
+  <path d="M256 83c-54 0-98 43-98 97 0 20 6 39 17 55l81 135 81-135c11-16 17-35 17-55 0-54-44-97-98-97Z" fill="#f59e0b"/>
+  <path d="M204 190c12-22 36-36 52-36s40 14 52 36l-52 89-52-89Z" fill="#fff3b0"/>
+  <path d="M202 389h108l-17 41h-74l-17-41Z" fill="#f59e0b"/>
+  <text x="256" y="467" text-anchor="middle" font-family="Arial, sans-serif" font-size="38" font-weight="bold" fill="white">حلويات</text>
+</svg>
+
