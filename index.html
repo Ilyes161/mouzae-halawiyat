@@ -28,6 +28,8 @@ input,select,button{font-family:'Cairo',sans-serif;}
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useCallback}=React;
+const DEFAULT_SUPABASE_URL='https://lwllkgwqyzonfevmsvfr.supabase.co';
+const DEFAULT_SUPABASE_KEY='sb_publishable_8FL5iTemcQ3sMl1Lt5nsIg_j1kWDkkA';
 
 // ── Storage (localStorage) ──
 const KEYS={products:'dist_products',suppliers:'dist_suppliers',clients:'dist_clients',purchases:'dist_purchases',sales:'dist_sales',payments:'dist_payments',expenses:'dist_expenses',settings:'dist_settings'};
@@ -516,8 +518,8 @@ function Expenses({expenses,saveExpenses}){
 function Backup({products,suppliers,clients,purchases,sales,payments,expenses,settings,saveProducts,saveSuppliers,saveClients,savePurchases,saveSales,savePayments,saveExpenses,saveSettings}){
   const [message,setMessage]=useState('');
   const [business,setBusiness]=useState(settings);
-  const [cloudUrl,setCloudUrl]=useState(settings.cloudUrl||'');
-  const [cloudKey,setCloudKey]=useState(settings.cloudKey||'');
+  const [cloudUrl,setCloudUrl]=useState(settings.cloudUrl||DEFAULT_SUPABASE_URL);
+  const [cloudKey,setCloudKey]=useState(settings.cloudKey||DEFAULT_SUPABASE_KEY);
   const [email,setEmail]=useState('');
   const [password,setPassword]=useState('');
   const [cloudBusy,setCloudBusy]=useState(false);
