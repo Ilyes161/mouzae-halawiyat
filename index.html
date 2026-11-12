@@ -538,7 +538,9 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
     const result=create?await client.auth.signUp({email,password}):await client.auth.signInWithPassword({email,password});
     setCloudBusy(false);
     if(result.error)return setMessage('تعذر الاتصال: '+result.error.message);
-    cloudSettings();setMessage(create?'تم إنشاء الحساب. تحقق من بريدك إن طلب Supabase ذلك.':'تم تسجيل الدخول بنجاح.');
+    cloudSettings();
+    if(create){setMessage('تم إنشاء الحساب. تحقق من بريدك ثم سجّل الدخول.');}
+    else {setMessage('تم تسجيل الدخول. جارٍ استعادة آخر نسخة سحابية...');await downloadCloud();}
   };
   const uploadCloud=async()=>{
     const client=cloudClient();
