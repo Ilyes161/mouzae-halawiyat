@@ -300,7 +300,7 @@ function Purchases({products,suppliers,purchases,savePurchases, payments, savePa
 }
 
 // ══════════════════════ SALES ══════════════════════
-function Sales({products,clients,sales,saveSales, payments, savePayments}){
+function Sales({products,clients,sales,saveSales, payments, savePayments, settings}){
   const [showForm,setShowForm]=useState(false);
   const [clientId,setClientId]=useState('');
   const [items,setItems]=useState([{productId:'',qty:'',unitPrice:''}]);
@@ -335,6 +335,16 @@ function Sales({products,clients,sales,saveSales, payments, savePayments}){
       saveSales(sales.filter(s=>s.id!==id));
     };
   const getClientName=id=>clients.find(c=>c.id===id)?.name||'غير معروف';
+  const invoiceText=s=>{
+    const lines=s.items.map(i=>{const p=products.find(x=>x.id===i.productId);return `${p?.name||'منتج'}: ${i.qty} × ${fmtNum(i.unitPrice)} = ${fmtNum(i.qty*i.unitPrice)} دج`;}).join('\n');
+    return `${settings?.businessName||'موزع الحلويات'}\nفاتورة بيع ${s.invoiceNo||''}\nالمحل: ${getClientName(s.clientId)}\nالتاريخ: ${fmtDate(s.date)}\n${lines}\nالإجمالي: ${fmtNum(s.total)} دج\nالمحصل: ${fmtNum(s.collected)} دج\nالمتبقي: ${fmtNum(s.total-s.collected)} دج`;
+  };
+  const printSale=s=>{
+    const rows=s.items.map(i=>{const p=products.find(x=>x.id===i.productId);return `<tr><td>${p?.name||'منتج'}</td><td>${i.qty}</td><td>${fmtNum(i.unitPrice)} دج</td><td>${fmtNum(i.qty*i.unitPrice)} دج</td></tr>`;}).join('');
+    const w=window.open('','_blank');if(!w)return alert('اسمح بفتح النوافذ المنبثقة للطباعة');
+    w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>${s.invoiceNo||'فاتورة بيع'}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111;max-width:760px;margin:auto}h1{text-align:center;color:#172554;margin:0 0 4px}h2{text-align:center;margin:0 0 18px;font-size:18px}p{margin:6px 0}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #999;padding:9px;text-align:center}th{background:#eef2ff}.totals{margin-top:18px;line-height:2;font-size:17px;font-weight:bold}@media print{button{display:none}}</style></head><body><h1>${settings?.businessName||'موزع الحلويات'}</h1><h2>فاتورة بيع</h2><p><b>رقم الفاتورة:</b> ${s.invoiceNo||''}</p><p><b>المحل:</b> ${getClientName(s.clientId)}</p><p><b>التاريخ:</b> ${fmtDate(s.date)}</p><table><thead><tr><th>المنتج</th><th>الكمية</th><th>سعر الوحدة</th><th>المجموع</th></tr></thead><tbody>${rows}</tbody></table><div class="totals">الإجمالي: ${fmtNum(s.total)} دج<br>المحصل: ${fmtNum(s.collected)} دج<br>المتبقي: ${fmtNum(s.total-s.collected)} دج</div><p>${settings?.phone?`الهاتف: ${settings.phone}`:''}</p><scr${'ipt'}>window.onload=()=>{window.print();}</scr${'ipt'}></body></html>`);w.document.close();w.focus();
+  };
+  const shareSale=async s=>{const text=invoiceText(s);try{if(navigator.share)await navigator.share({title:`فاتورة ${s.invoiceNo||''}`,text});else{await navigator.clipboard.writeText(text);alert('تم نسخ الفاتورة. يمكنك لصقها وإرسالها.');}}catch(e){if(e?.name!=='AbortError')alert('تعذر إرسال الفاتورة.');}};
   return <div style={{padding:'14px'}}>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}>
       <span style={{fontWeight:'800',color:'#1a2340'}}>المبيعات <span style={{fontSize:'0.75rem',color:'#a0aec0'}}>({sales.length})</span></span>
@@ -393,6 +403,8 @@ function Sales({products,clients,sales,saveSales, payments, savePayments}){
             <button onClick={()=>handleCollect(s.id)} style={S.greenBtn}>تحصيل</button>
             <button onClick={()=>setCollectFor(null)} style={S.editBtn}>إلغاء</button>
           </div>:rem>0?<button onClick={()=>{setCollectFor(s.id);setCollectAmt('');}} style={S.greenBtn}>💰 تسجيل تحصيل</button>:null}
+          <button onClick={()=>printSale(s)} style={S.editBtn}>🖨️ طباعة / PDF</button>
+          <button onClick={()=>shareSale(s)} style={S.editBtn}>📤 إرسال</button>
           <button onClick={()=>delS(s.id)} style={S.delBtn}>🗑️</button>
         </div>
       </div>;
