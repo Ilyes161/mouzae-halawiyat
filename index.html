@@ -143,10 +143,11 @@ function Products({products,saveProducts,productStock}){
   const f=(k,v)=>setForm(p=>({...p,[k]:v}));
   const reset=()=>{setForm({name:'',unit:'kg',cartonWeight:'',costPrice:'',sellPrice:'',initialStock:'',minStock:'2'});setEditId(null);setShowForm(false);};
   const handleSave=()=>{
-    if(!form.name)return alert('أدخل اسم المنتج');
-    const data={...form,cartonWeight:+form.cartonWeight||0,costPrice:+form.costPrice||0,sellPrice:+form.sellPrice||0,initialStock:+form.initialStock||0,minStock:+form.minStock||2};
-    if(editId)saveProducts(products.map(p=>p.id===editId?{...p,...data}:p));
-    else saveProducts([...products,{id:uid(),...data}]);
+    const name=String(form.name||'').trim();
+    if(!name)return alert('أدخل اسم المنتج');
+    const data={...form,name,cartonWeight:+form.cartonWeight||0,costPrice:+form.costPrice||0,sellPrice:+form.sellPrice||0,initialStock:+form.initialStock||0,minStock:+form.minStock||2};
+    const next=editId?products.map(p=>p.id===editId?{...p,...data}:p):[...products,{id:uid(),...data}];
+    saveProducts(next);
     reset();
   };
   const startEdit=p=>{setForm({name:p.name,unit:p.unit,cartonWeight:p.cartonWeight||'',costPrice:p.costPrice,sellPrice:p.sellPrice,initialStock:p.initialStock||0,minStock:p.minStock||2});setEditId(p.id);setShowForm(true);};
