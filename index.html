@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="theme-color" content="#1a2340"/>
+<meta name="description" content="نظام محلي لإدارة توزيع الحلويات والمبيعات والديون"/>
+<title>🍯 موزع الحلويات</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml"/>
+<link rel="apple-touch-icon" href="icon.svg"/>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+body{margin:0;padding:0;background:#f4f6fb;font-family:'Cairo',sans-serif;direction:rtl;}
+input,select,button{font-family:'Cairo',sans-serif;}
+::-webkit-scrollbar{display:none;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback}=React;
+
+// ── Storage (localStorage) ──
+const KEYS={products:'dist_products',suppliers:'dist_suppliers',clients:'dist_clients',purchases:'dist_purchases',sales:'dist_sales',payments:'dist_payments',expenses:'dist_expenses',settings:'dist_settings'};
+function load(key){try{const v=localStorage.getItem(key);return v?JSON.parse(v):[];}catch{return[];}}
+function save(key,data){try{localStorage.setItem(key,JSON.stringify(data));}catch(e){console.error(e);}}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5);}
+function fmtDate(d){return new Date(d).toLocaleDateString('ar',{day:'2-digit',month:'2-digit',year:'2-digit'});}
+function todayInput(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function makeInvoiceNo(prefix,list){return `${prefix}-${new Date().getFullYear()}-${String(list.length+1).padStart(4,'0')}`;}
+function fmtNum(n){const num=Number(n||0);return num%1===0?num.toLocaleString('ar'):num.toLocaleString('ar',{minimumFractionDigits:1,maximumFractionDigits:2});}
+const unitLabel=u=>({kg:'كغ',box:'كرتون',piece:'قطعة'}[u]||u);
+// ── Styles ──
+const S={
+  input:{width:'100%',padding:'9px 12px',border:'1.5px solid #dde3ee',borderRadius:'9px',fontFamily:'Cairo,sans-serif',fontSize:'0.85rem',boxSizing:'border-box',background:'white',color:'#1a2340',outline:'none'},
+  label:{display:'block',fontSize:'0.72rem',fontWeight:'700',color:'#5a6a8a',marginBottom:'4px'},
+  formCard:{background:'#f0f4ff',borderRadius:'14px',padding:'14px',marginBottom:'12px',border:'1px solid #dde3ee'},
+  itemCard:{background:'white',borderRadius:'12px',padding:'12px 14px',marginBottom:'8px',boxShadow:'0 1px 6px rgba(0,0,0,0.06)'},
+  addBtn:{background:'#1a2340',color:'white',border:'none',borderRadius:'9px',padding:'7px 14px',fontFamily:'Cairo,sans-serif',fontWeight:'700',fontSize:'0.75rem',cursor:'pointer'},
+  saveBtn:{width:'100%',background:'linear-gradient(135deg,#f59e0b,#d97706)',color:'white',border:'none',borderRadius:'9px',padding:'11px',fontFamily:'Cairo,sans-serif',fontWeight:'800',fontSize:'0.88rem',cursor:'pointer',marginTop:'6px'},
+  greenBtn:{background:'#059669',color:'white',border:'none',borderRadius:'7px',padding:'7px 12px',fontFamily:'Cairo,sans-serif',fontWeight:'700',fontSize:'0.75rem',cursor:'pointer'},
+  editBtn:{background:'#eef0f5',color:'#374151',border:'none',borderRadius:'7px',padding:'5px 10px',fontFamily:'Cairo,sans-serif',fontWeight:'600',fontSize:'0.72rem',cursor:'pointer'},
+  delBtn:{background:'#fee2e2',color:'#dc2626',border:'none',borderRadius:'7px',padding:'5px 8px',fontFamily:'Cairo,sans-serif',fontSize:'0.72rem',cursor:'pointer'},
+};
+
+function Field({label,value,onChange,type='text',placeholder=''}){
+  return <div style={{marginBottom:'10px'}}>
+    <label style={S.label}>{label}</label>
+    <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={S.input}/>
+  </div>;
+}
+function SelectField({label,value,onChange,children}){
+  return <div style={{marginBottom:'10px'}}>
+    <label style={S.label}>{label}</label>
+    <select value={value} onChange={e=>onChange(e.target.value)} style={S.input}>{children}</select>
+  </div>;
+}
+function Empty({msg}){
+  return <div style={{textAlign:'center',padding:'32px 20px',color:'#a0aec0',fontSize:'0.85rem'}}>
+    <div style={{fontSize:'2.5rem',marginBottom:'10px'}}>📭</div>{msg}
+  </div>;
+}
+function Badge({text,color,bg}){
+  return <span style={{fontSize:'0.67rem',fontWeight:'700',padding:'2px 9px',borderRadius:'20px',background:bg,color}}>{text}</span>;
+}
+
+// ══════════════════════ DASHBOARD ══════════════════════
+function Dashboard({products,suppliers,clients,purchases,sales,totalSupplierDebt,totalClientDebt,netProfit,monthlyExpenses,productStock,setTab, payments}){
+  const today=new Date().toDateString();
+  const todaySales=sales.filter(s=>new Date(s.date).toDateString()===today).reduce((a,s)=>a+s.total,0);
+  const todayPurchases=purchases.filter(p=>new Date(p.date).toDateString()===today).reduce((a,p)=>a+p.total,0);
+  // Helper to sum payments related to a supplier or client
+  const supplierPayments = (id)=> payments.filter(p=>p.type==='to_supplier' && p.entityId===id).reduce((a,p)=>a+p.amount,0);
+  const clientPayments = (id)=> payments.filter(p=>p.type==='from_client' && p.entityId===id).reduce((a,p)=>a+p.amount,0);
+  const unpaidP = purchases.filter(p=> {
+    const paid = p.paid + supplierPayments(p.supplierId);
+    return p.total - paid > 0;
+  }).length;
+  const unpaidS = sales.filter(s=> {
+    const collected = s.collected + clientPayments(s.clientId);
+    return s.total - collected > 0;
+  }).length;
+  const net=totalClientDebt-totalSupplierDebt;
+  const recent=[...purchases.map(p=>({...p,_kind:'شراء',_color:'#dc2626',_bg:'#fee2e2'})),...sales.map(s=>({...s,_kind:'بيع',_color:'#059669',_bg:'#d1fae5'}))].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
+  return <div style={{padding:'14px 14px 8px'}}>
+    <div style={{background:'linear-gradient(135deg,#1a2340 0%,#2d3e6e 100%)',borderRadius:'16px',padding:'16px 18px',marginBottom:'14px',color:'white',boxShadow:'0 4px 20px rgba(26,35,64,0.25)'}}>
+      <div style={{fontSize:'0.72rem',opacity:0.65,marginBottom:'3px'}}>الوضع الصافي (ديون المحلات − ديوني)</div>
+      <div style={{fontSize:'2rem',fontWeight:'800',color:net>=0?'#4ade80':'#f87171',lineHeight:1}}>{fmtNum(net)} <span style={{fontSize:'1rem'}}>دج</span></div>
+      <div style={{display:'flex',gap:'16px',marginTop:'10px'}}>
+        <div style={{fontSize:'0.72rem',opacity:0.8}}><span style={{color:'#f87171'}}>📤 {fmtNum(totalSupplierDebt)}</span> دج ديوني</div>
+        <div style={{fontSize:'0.72rem',opacity:0.8}}><span style={{color:'#4ade80'}}>📥 {fmtNum(totalClientDebt)}</span> دج لي</div>
+      </div>
+    </div>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'9px',marginBottom:'14px'}}>
+      {[
+        {icon:'🛒',label:'مشتريات اليوم',val:`${fmtNum(todayPurchases)} دج`,color:'#dc2626',cb:()=>setTab('purchases')},
+        {icon:'💰',label:'مبيعات اليوم',val:`${fmtNum(todaySales)} دج`,color:'#059669',cb:()=>setTab('sales')},
+        {icon:'⏳',label:'فواتير شراء غير مدفوعة',val:`${unpaidP} فاتورة`,color:'#f59e0b',cb:()=>setTab('purchases')},
+        {icon:'📋',label:'فواتير بيع غير محصلة',val:`${unpaidS} فاتورة`,color:'#6366f1',cb:()=>setTab('sales')},
+      ].map((c,i)=>(
+        <div key={i} onClick={c.cb} style={{background:'white',borderRadius:'12px',padding:'12px 14px',boxShadow:'0 1px 6px rgba(0,0,0,0.06)',cursor:'pointer',borderTop:`3px solid ${c.color}`}}>
+          <div style={{fontSize:'1.3rem',marginBottom:'4px'}}>{c.icon}</div>
+          <div style={{fontSize:'0.63rem',color:'#6b7280',marginBottom:'2px'}}>{c.label}</div>
+          <div style={{fontSize:'0.9rem',fontWeight:'800',color:'#1a2340'}}>{c.val}</div>
+        </div>
+      ))}
+    </div>
+    <div style={{background:netProfit>=0?'linear-gradient(135deg,#059669,#047857)':'linear-gradient(135deg,#dc2626,#b91c1c)',borderRadius:'12px',padding:'12px 16px',marginBottom:'14px',color:'white',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+      <div><div style={{fontSize:'0.7rem',opacity:0.8}}>إجمالي الأرباح</div><div style={{fontSize:'1.3rem',fontWeight:'800'}}>{fmtNum(netProfit)} دج</div></div>
+      <div style={{fontSize:'2rem'}}>📊</div>
+    </div>
+    <div style={{fontSize:'0.7rem',color:'#7c879d',textAlign:'center',marginTop:'-9px',marginBottom:'12px'}}>مصاريف الشهر الحالي: {fmtNum(monthlyExpenses)} دج</div>
+    <div style={{fontWeight:'800',fontSize:'0.85rem',color:'#1a2340',marginBottom:'8px'}}>آخر النشاطات</div>
+    {recent.length===0&&<Empty msg="لا توجد نشاطات بعد. ابدأ بإضافة منتجات وموردين!"/>}
+    {recent.map(item=>(
+      <div key={item.id+item._kind} style={{background:'white',borderRadius:'10px',padding:'10px 13px',marginBottom:'6px',display:'flex',justifyContent:'space-between',alignItems:'center',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+          <span style={{background:item._bg,color:item._color,fontSize:'0.68rem',fontWeight:'800',padding:'2px 8px',borderRadius:'20px'}}>{item._kind}</span>
+          <span style={{fontSize:'0.78rem',color:'#6b7280'}}>{fmtDate(item.date)}</span>
+        </div>
+        <span style={{fontWeight:'800',color:'#1a2340',fontSize:'0.9rem'}}>{fmtNum(item.total)} دج</span>
+      </div>
+    ))}
+  </div>;
+}
+
+// ══════════════════════ PRODUCTS ══════════════════════
+function Products({products,saveProducts,productStock}){
+  const [showForm,setShowForm]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [form,setForm]=useState({name:'',unit:'kg',cartonWeight:'',costPrice:'',sellPrice:'',initialStock:'',minStock:'2'});
+  const f=(k,v)=>setForm(p=>({...p,[k]:v}));
+  const reset=()=>{setForm({name:'',unit:'kg',cartonWeight:'',costPrice:'',sellPrice:'',initialStock:'',minStock:'2'});setEditId(null);setShowForm(false);};
+  const handleSave=()=>{
+    if(!form.name)return alert('أدخل اسم المنتج');
+    const data={...form,cartonWeight:+form.cartonWeight||0,costPrice:+form.costPrice||0,sellPrice:+form.sellPrice||0,initialStock:+form.initialStock||0,minStock:+form.minStock||2};
+    if(editId)saveProducts(products.map(p=>p.id===editId?{...p,...data}:p));
+    else saveProducts([...products,{id:uid(),...data}]);
+    reset();
+  };
+  const startEdit=p=>{setForm({name:p.name,unit:p.unit,cartonWeight:p.cartonWeight||'',costPrice:p.costPrice,sellPrice:p.sellPrice,initialStock:p.initialStock||0,minStock:p.minStock||2});setEditId(p.id);setShowForm(true);};
+  const del=id=>{if(window.confirm('حذف هذا المنتج؟'))saveProducts(products.filter(p=>p.id!==id));};
+  return <div style={{padding:'14px'}}>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}>
+      <span style={{fontWeight:'800',color:'#1a2340'}}>المنتجات <span style={{fontSize:'0.75rem',color:'#a0aec0'}}>({products.length})</span></span>
+      <button onClick={()=>{setShowForm(!showForm);setEditId(null);setForm({name:'',unit:'kg',cartonWeight:'',costPrice:'',sellPrice:'',initialStock:'',minStock:'2'});}} style={S.addBtn}>{showForm?'✕ إلغاء':'+ منتج جديد'}</button>
+    </div>
+    {showForm&&<div style={S.formCard}>
+      <div style={{fontWeight:'800',color:'#1a2340',marginBottom:'12px',fontSize:'0.9rem'}}>{editId?'تعديل منتج':'منتج جديد'}</div>
+      <Field label="اسم المنتج *" value={form.name} onChange={v=>f('name',v)} placeholder="بقلاوة، قريوش..."/>
+      <SelectField label="وحدة القياس" value={form.unit} onChange={v=>f('unit',v)}>
+        <option value="kg">كيلوغرام (كغ)</option>
+        <option value="box">علبة / كرتون</option>
+        <option value="piece">قطعة</option>
+      </SelectField>
+      <Field label="وزن الكرتون بالكيلو (اختياري)" value={form.cartonWeight} onChange={v=>f('cartonWeight',v)} type="number" placeholder="مثلاً 4 أو 5"/>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
+        <Field label="سعر الشراء (دج)" value={form.costPrice} onChange={v=>f('costPrice',v)} type="number" placeholder="0"/>
+        <Field label="سعر البيع (دج)" value={form.sellPrice} onChange={v=>f('sellPrice',v)} type="number" placeholder="0"/>
+        <Field label="مخزون ابتدائي" value={form.initialStock} onChange={v=>f('initialStock',v)} type="number" placeholder="0"/>
+        <Field label="حد التنبيه المنخفض" value={form.minStock} onChange={v=>f('minStock',v)} type="number" placeholder="2"/>
+      </div>
+      <button onClick={handleSave} style={S.saveBtn}>💾 حفظ المنتج</button>
+    </div>}
+    {products.length===0&&!showForm&&<Empty msg="أضف منتجاتك الأولى للبدء!"/>}
+    {products.map(p=>{
+      const stock=productStock(p.id);
+      const low=stock<=(p.minStock||2);
+      return <div key={p.id} style={{...S.itemCard,borderRight:`3px solid ${low?'#dc2626':'#10b981'}`}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+          <div>
+            <div style={{fontWeight:'800',color:'#1a2340',fontSize:'0.9rem'}}>{p.name}</div>
+            <div style={{fontSize:'0.7rem',color:'#6b7280',marginTop:'2px'}}>شراء: {p.costPrice} | بيع: {p.sellPrice} دج/{unitLabel(p.unit)}{p.cartonWeight?` · الكرتون ${p.cartonWeight} كغ`:''}</div>
+            <div style={{fontSize:'0.7rem',color:'#059669',marginTop:'1px'}}>هامش: +{fmtNum(p.sellPrice-p.costPrice)} دج/{unitLabel(p.unit)}</div>
+          </div>
+          <div style={{textAlign:'left'}}>
+            <div style={{fontSize:'1.1rem',fontWeight:'900',color:low?'#dc2626':'#059669'}}>{fmtNum(stock)}</div>
+            <div style={{fontSize:'0.65rem',color:low?'#dc2626':'#6b7280'}}>{unitLabel(p.unit)}{low?' ⚠️':''}</div>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:'6px',marginTop:'8px'}}>
+          <button onClick={()=>startEdit(p)} style={S.editBtn}>✏️ تعديل</button>
+          <button onClick={()=>del(p.id)} style={S.delBtn}>🗑️</button>
+        </div>
+      </div>;
+    })}
+  </div>;
+}
+
+// ══════════════════════ PURCHASES ══════════════════════
+function Purchases({products,suppliers,purchases,savePurchases, payments, savePayments}){
+  const [showForm,setShowForm]=useState(false);
+  const [supplierId,setSupplierId]=useState('');
+  const [items,setItems]=useState([{productId:'',qty:'',unitPrice:''}]);
+  const [paid,setPaid]=useState('');
+  const [note,setNote]=useState('');
+  const [invoiceDate,setInvoiceDate]=useState(todayInput());
+  const [payFor,setPayFor]=useState(null);
+  const [payAmt,setPayAmt]=useState('');
+  const total=items.reduce((s,i)=>s+((+i.qty||0)*(+i.unitPrice||0)),0);
+  const addItem=()=>setItems([...items,{productId:'',qty:'',unitPrice:''}]);
+  const updItem=(idx,k,v)=>{
+    const n=[...items];n[idx]={...n[idx],[k]:v};
+    if(k==='productId'){const pr=products.find(p=>p.id===v);if(pr)n[idx].unitPrice=pr.costPrice;}
+    setItems(n);
+  };
+  const remItem=idx=>setItems(items.filter((_,i)=>i!==idx));
+  const reset=()=>{setShowForm(false);setSupplierId('');setItems([{productId:'',qty:'',unitPrice:''}]);setPaid('');setNote('');setInvoiceDate(todayInput());};
+  const handleSave=()=>{
+    if(!supplierId)return alert('اختر المورد');
+    if(items.some(i=>!i.productId||!i.qty))return alert('أكمل بيانات الأصناف');
+    savePurchases([...purchases,{id:uid(),invoiceNo:makeInvoiceNo('PUR',purchases),date:new Date(`${invoiceDate}T12:00:00`).toISOString(),supplierId,items:items.map(i=>({productId:i.productId,qty:+i.qty,unitPrice:+i.unitPrice||0})),total,paid:+paid||0,note}]);
+    reset();
+  };
+  const handlePay=pId=>{
+    const amt=+payAmt;if(!amt||amt<=0)return alert('أدخل مبلغاً صحيحاً');
+    savePurchases(purchases.map(p=>p.id===pId?{...p,paid:Math.min(p.paid+amt,p.total)}:p));
+    setPayFor(null);setPayAmt('');
+  };
+  const delP=id=>{
+      if(!window.confirm('حذف هذه الفاتورة؟')) return;
+      savePurchases(purchases.filter(p=>p.id!==id));
+    };
+  const getSupName=id=>suppliers.find(s=>s.id===id)?.name||'غير معروف';
+  return <div style={{padding:'14px'}}>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}>
+      <span style={{fontWeight:'800',color:'#1a2340'}}>المشتريات <span style={{fontSize:'0.75rem',color:'#a0aec0'}}>({purchases.length})</span></span>
+      <button onClick={()=>setShowForm(!showForm)} style={S.addBtn}>{showForm?'✕ إلغاء':'+ فاتورة شراء'}</button>
+    </div>
+    {showForm&&<div style={S.formCard}>
+      <div style={{fontWeight:'800',color:'#1a2340',marginBottom:'12px',fontSize:'0.9rem'}}>فاتورة شراء جديدة</div>
+      {suppliers.length===0?<div style={{color:'#dc2626',fontSize:'0.8rem',textAlign:'center',padding:'10px'}}>أضف موردين أولاً من قسم "جهات الاتصال"</div>:<>
+        <SelectField label="المورد *" value={supplierId} onChange={setSupplierId}>
+          <option value="">— اختر المورد —</option>
+          {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+        </SelectField>
+        <Field label="تاريخ الفاتورة *" value={invoiceDate} onChange={setInvoiceDate} type="date"/>
+        <div style={{fontSize:'0.75rem',fontWeight:'700',color:'#5a6a8a',marginBottom:'6px'}}>الأصناف المشتراة:</div>
+        {items.map((item,idx)=>(
+          <div key={idx} style={{background:'white',borderRadius:'10px',padding:'10px',marginBottom:'7px',border:'1px solid #dde3ee'}}>
+            <SelectField label={`الصنف ${idx+1}`} value={item.productId} onChange={v=>updItem(idx,'productId',v)}>
+              <option value="">— اختر المنتج —</option>
+              {products.map(p=><option key={p.id} value={p.id}>{p.name} ({unitLabel(p.unit)})</option>)}
+            </SelectField>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'7px'}}>
+              <div><label style={S.label}>الكمية</label><input type="number" value={item.qty} onChange={e=>updItem(idx,'qty',e.target.value)} placeholder="0" style={S.input}/></div>
+              <div><label style={S.label}>سعر الوحدة (دج)</label><input type="number" value={item.unitPrice} onChange={e=>updItem(idx,'unitPrice',e.target.value)} placeholder="0" style={S.input}/></div>
+            </div>
+            {items.length>1&&<button onClick={()=>remItem(idx)} style={{...S.delBtn,marginTop:'6px',width:'100%',padding:'4px'}}>✕ حذف هذا الصنف</button>}
+          </div>
+        ))}
+        <button onClick={addItem} style={{...S.editBtn,width:'100%',marginBottom:'10px',padding:'8px',textAlign:'center'}}>+ إضافة صنف آخر</button>
+        <div style={{background:'#1a2340',color:'white',borderRadius:'10px',padding:'10px 14px',marginBottom:'10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span style={{fontSize:'0.8rem',opacity:0.8}}>الإجمالي:</span>
+          <span style={{fontWeight:'900',fontSize:'1.1rem'}}>{fmtNum(total)} دج</span>
+        </div>
+        <Field label="المبلغ المدفوع الآن (دج) — اترك 0 إذا كله دين" value={paid} onChange={setPaid} type="number" placeholder="0"/>
+        <Field label="ملاحظة (اختياري)" value={note} onChange={setNote} placeholder="..."/>
+        <button onClick={handleSave} style={S.saveBtn}>💾 حفظ الفاتورة</button>
+      </>}
+    </div>}
+    {purchases.length===0&&!showForm&&<Empty msg="لا توجد مشتريات بعد."/>}
+    {[...purchases].reverse().map(p=>{
+      const rem=p.total-p.paid;
+      return <div key={p.id} style={{...S.itemCard,borderRight:`3px solid ${rem>0?'#f59e0b':'#10b981'}`}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+          <div>
+            <div style={{fontWeight:'800',color:'#1a2340',fontSize:'0.9rem'}}>{getSupName(p.supplierId)}</div>
+            <div style={{fontSize:'0.7rem',color:'#6b7280',marginTop:'1px'}}>{p.invoiceNo&&`${p.invoiceNo} · `}{fmtDate(p.date)} · {p.items.length} صنف</div>
+            {p.note&&<div style={{fontSize:'0.7rem',color:'#9ca3af',marginTop:'2px'}}>📝 {p.note}</div>}
+          </div>
+          <div style={{textAlign:'left'}}>
+            <div style={{fontWeight:'900',color:'#1a2340',fontSize:'0.92rem'}}>{fmtNum(p.total)} دج</div>
+            {rem>0?<div style={{fontSize:'0.7rem',color:'#dc2626',marginTop:'2px'}}>متبقي: {fmtNum(rem)} دج</div>:<Badge text="مدفوع ✓" color="#059669" bg="#d1fae5"/>}
+          </div>
+        </div>
+        <div style={{display:'flex',gap:'6px',marginTop:'8px',flexWrap:'wrap'}}>
+          {rem>0&&payFor===p.id?<div style={{width:'100%',display:'flex',gap:'6px'}}>
+            <input type="number" placeholder="المبلغ" value={payAmt} onChange={e=>setPayAmt(e.target.value)} style={{...S.input,flex:1}}/>
+            <button onClick={()=>handlePay(p.id)} style={S.greenBtn}>دفع</button>
+            <button onClick={()=>setPayFor(null)} style={S.editBtn}>إلغاء</button>
+          </div>:rem>0?<button onClick={()=>{setPayFor(p.id);setPayAmt('');}} style={S.greenBtn}>💸 تسجيل دفعة</button>:null}
+          <button onClick={()=>delP(p.id)} style={S.delBtn}>🗑️</button>
+        </div>
+      </div>;
+    })}
+  </div>;
+}
+
+// ══════════════════════ SALES ══════════════════════
+function Sales({products,clients,sales,saveSales, payments, savePayments}){
+  const [showForm,setShowForm]=useState(false);
+  const [clientId,setClientId]=useState('');
+  const [items,setItems]=useState([{productId:'',qty:'',unitPrice:''}]);
+  const [collected,setCollected]=useState('');
+  const [note,setNote]=useState('');
+  const [invoiceDate,setInvoiceDate]=useState(todayInput());
+  const [collectFor,setCollectFor]=useState(null);
+  const [collectAmt,setCollectAmt]=useState('');
+  const total=items.reduce((s,i)=>s+((+i.qty||0)*(+i.unitPrice||0)),0);
+  const addItem=()=>setItems([...items,{productId:'',qty:'',unitPrice:''}]);
+  const updItem=(idx,k,v)=>{
+    const n=[...items];n[idx]={...n[idx],[k]:v};
+    if(k==='productId'){const pr=products.find(p=>p.id===v);if(pr)n[idx].unitPrice=pr.sellPrice;}
+    setItems(n);
+  };
+  const remItem=idx=>setItems(items.filter((_,i)=>i!==idx));
+  const reset=()=>{setShowForm(false);setClientId('');setItems([{productId:'',qty:'',unitPrice:''}]);setCollected('');setNote('');setInvoiceDate(todayInput());};
+  const handleSave=()=>{
+    if(!clientId)return alert('اختر المحل');
+    if(items.some(i=>!i.productId||!i.qty))return alert('أكمل بيانات الأصناف');
+    // Capture the product's costPrice at the moment of sale for accurate profit calculation
+    saveSales([...sales,{id:uid(),invoiceNo:makeInvoiceNo('SAL',sales),date:new Date(`${invoiceDate}T12:00:00`).toISOString(),clientId,items:items.map(i=>{ const pr=products.find(p=>p.id===i.productId); return {productId:i.productId,qty:+i.qty,unitPrice:+i.unitPrice||0,costPrice:pr?.costPrice||0}; }),total,collected:+collected||0,note}]);
+    reset();
+  };
+  const handleCollect=sId=>{
+    const amt=+collectAmt;if(!amt||amt<=0)return alert('أدخل مبلغاً صحيحاً');
+    saveSales(sales.map(s=>s.id===sId?{...s,collected:Math.min(s.collected+amt,s.total)}:s));
+    setCollectFor(null);setCollectAmt('');
+  };
+  const delS=id=>{
+      if(!window.confirm('حذف هذه الفاتورة؟')) return;
+      saveSales(sales.filter(s=>s.id!==id));
+    };
+  const getClientName=id=>clients.find(c=>c.id===id)?.name||'غير معروف';
+  return <div style={{padding:'14px'}}>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}>
+      <span style={{fontWeight:'800',color:'#1a2340'}}>المبيعات <span style={{fontSize:'0.75rem',color:'#a0aec0'}}>({sales.length})</span></span>
+      <button onClick={()=>setShowForm(!showForm)} style={S.addBtn}>{showForm?'✕ إلغاء':'+ فاتورة بيع'}</button>
+    </div>
+    {showForm&&<div style={S.formCard}>
+      <div style={{fontWeight:'800',color:'#1a2340',marginBottom:'12px',fontSize:'0.9rem'}}>فاتورة بيع جديدة</div>
+      {clients.length===0?<div style={{color:'#dc2626',fontSize:'0.8rem',textAlign:'center',padding:'10px'}}>أضف محلات أولاً من قسم "جهات الاتصال"</div>:<>
+        <SelectField label="المحل *" value={clientId} onChange={setClientId}>
+          <option value="">— اختر المحل —</option>
+          {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+        </SelectField>
+        <Field label="تاريخ الفاتورة *" value={invoiceDate} onChange={setInvoiceDate} type="date"/>
+        <div style={{fontSize:'0.75rem',fontWeight:'700',color:'#5a6a8a',marginBottom:'6px'}}>الأصناف المباعة:</div>
+        {items.map((item,idx)=>(
+          <div key={idx} style={{background:'white',borderRadius:'10px',padding:'10px',marginBottom:'7px',border:'1px solid #dde3ee'}}>
+            <SelectField label={`الصنف ${idx+1}`} value={item.productId} onChange={v=>updItem(idx,'productId',v)}>
+              <option value="">— اختر المنتج —</option>
+              {products.map(p=><option key={p.id} value={p.id}>{p.name} ({unitLabel(p.unit)})</option>)}
+            </SelectField>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'7px'}}>
+              <div><label style={S.label}>الكمية</label><input type="number" value={item.qty} onChange={e=>updItem(idx,'qty',e.target.value)} placeholder="0" style={S.input}/></div>
+              <div><label style={S.label}>سعر البيع (دج)</label><input type="number" value={item.unitPrice} onChange={e=>updItem(idx,'unitPrice',e.target.value)} placeholder="0" style={S.input}/></div>
+            </div>
+            {items.length>1&&<button onClick={()=>remItem(idx)} style={{...S.delBtn,marginTop:'6px',width:'100%',padding:'4px'}}>✕ حذف هذا الصنف</button>}
+          </div>
+        ))}
+        <button onClick={addItem} style={{...S.editBtn,width:'100%',marginBottom:'10px',padding:'8px',textAlign:'center'}}>+ إضافة صنف آخر</button>
+        <div style={{background:'linear-gradient(135deg,#059669,#047857)',color:'white',borderRadius:'10px',padding:'10px 14px',marginBottom:'10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span style={{fontSize:'0.8rem',opacity:0.85}}>الإجمالي:</span>
+          <span style={{fontWeight:'900',fontSize:'1.1rem'}}>{fmtNum(total)} دج</span>
+        </div>
+        <Field label="المبلغ المحصل الآن (دج) — اترك 0 إذا كله دين" value={collected} onChange={setCollected} type="number" placeholder="0"/>
+        <Field label="ملاحظة (اختياري)" value={note} onChange={setNote} placeholder="..."/>
+        <button onClick={handleSave} style={S.saveBtn}>💾 حفظ الفاتورة</button>
+      </>}
+    </div>}
+    {sales.length===0&&!showForm&&<Empty msg="لا توجد مبيعات بعد."/>}
+    {[...sales].reverse().map(s=>{
+      const rem=s.total-s.collected;
+      return <div key={s.id} style={{...S.itemCard,borderRight:`3px solid ${rem>0?'#6366f1':'#10b981'}`}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+          <div>
+            <div style={{fontWeight:'800',color:'#1a2340',fontSize:'0.9rem'}}>{getClientName(s.clientId)}</div>
+            <div style={{fontSize:'0.7rem',color:'#6b7280',marginTop:'1px'}}>{s.invoiceNo&&`${s.invoiceNo} · `}{fmtDate(s.date)} · {s.items.length} صنف</div>
+            {s.note&&<div style={{fontSize:'0.7rem',color:'#9ca3af',marginTop:'2px'}}>📝 {s.note}</div>}
+          </div>
+          <div style={{textAlign:'left'}}>
+            <div style={{fontWeight:'900',color:'#1a2340',fontSize:'0.92rem'}}>{fmtNum(s.total)} دج</div>
+            {rem>0?<div style={{fontSize:'0.7rem',color:'#6366f1',marginTop:'2px'}}>متبقي: {fmtNum(rem)} دج</div>:<Badge text="محصل ✓" color="#059669" bg="#d1fae5"/>}
+          </div>
+        </div>
+        <div style={{display:'flex',gap:'6px',marginTop:'8px',flexWrap:'wrap'}}>
+          {rem>0&&collectFor===s.id?<div style={{width:'100%',display:'flex',gap:'6px'}}>
+            <input type="number" placeholder="المبلغ" value={collectAmt} onChange={e=>setCollectAmt(e.target.value)} style={{...S.input,flex:1}}/>
+            <button onClick={()=>handleCollect(s.id)} style={S.greenBtn}>تحصيل</button>
+            <button onClick={()=>setCollectFor(null)} style={S.editBtn}>إلغاء</button>
+          </div>:rem>0?<button onClick={()=>{setCollectFor(s.id);setCollectAmt('');}} style={S.greenBtn}>💰 تسجيل تحصيل</button>:null}
+          <button onClick={()=>delS(s.id)} style={S.delBtn}>🗑️</button>
+        </div>
+      </div>;
+    })}
+  </div>;
+}
+
+// ══════════════════════ CONTACTS ══════════════════════
+function Contacts({suppliers,saveSuppliers,clients,saveClients,purchases,sales,payments,savePayments,supplierDebt,clientDebt}){
+  const [sub,setSub]=useState('suppliers');
+  const [showForm,setShowForm]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [form,setForm]=useState({name:'',phone:''});
+  const [payFor,setPayFor]=useState(null);
+  const [payAmt,setPayAmt]=useState('');
+  const [payNote,setPayNote]=useState('');
+  const isSupplier=sub==='suppliers';
+  const list=isSupplier?suppliers:clients;
+  const saveList=isSupplier?saveSuppliers:saveClients;
+  const getDebt=isSupplier?supplierDebt:clientDebt;
+  const reset=()=>{setForm({name:'',phone:''});setEditId(null);setShowForm(false);};
+  const handleSave=()=>{
+    if(!form.name)return alert('أدخل الاسم');
+    if(editId)saveList(list.map(i=>i.id===editId?{...i,...form}:i));
+    else saveList([...list,{id:uid(),...form}]);
+    reset();
+  };
+  const startEdit=item=>{setForm({name:item.name,phone:item.phone||''});setEditId(item.id);setShowForm(true);};
+  const del=id=>{if(window.confirm('حذف؟'))saveList(list.filter(i=>i.id!==id));};
+  const handlePayment=entityId=>{
+    const amt=+payAmt;if(!amt||amt<=0)return alert('أدخل مبلغاً صحيحاً');
+    savePayments([...payments,{id:uid(),date:new Date().toISOString(),type:isSupplier?'to_supplier':'from_client',entityId,amount:amt,note:payNote}]);
+    setPayFor(null);setPayAmt('');setPayNote('');
+  };
+  const txCount=id=>isSupplier?purchases.filter(p=>p.supplierId===id).length:sales.filter(s=>s.clientId===id).length;
+  const totalDebt=list.reduce((s,i)=>s+Math.max(0,getDebt(i.id)),0);
+  return <div style={{padding:'14px'}}>
+    <div style={{background:isSupplier?'linear-gradient(135deg,#dc2626,#b91c1c)':'linear-gradient(135deg,#059669,#047857)',borderRadius:'12px',padding:'10px 16px',marginBottom:'12px',color:'white',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+      <div style={{fontSize:'0.75rem',opacity:0.85}}>{isSupplier?'إجمالي ديوني للموردين':'إجمالي ديون المحلات لي'}</div>
+      <div style={{fontWeight:'900',fontSize:'1.1rem'}}>{fmtNum(totalDebt)} دج</div>
+    </div>
+    <div style={{display:'flex',background:'#eef0f5',borderRadius:'11px',padding:'3px',marginBottom:'13px'}}>
+      {[{id:'suppliers',icon:'🏭',label:`الموردون (${suppliers.length})`},{id:'clients',icon:'🏪',label:`المحلات (${clients.length})`}].map(t=>(
+        <button key={t.id} onClick={()=>{setSub(t.id);setShowForm(false);setEditId(null);}} style={{flex:1,padding:'8px',borderRadius:'9px',border:'none',cursor:'pointer',fontFamily:'Cairo,sans-serif',fontWeight:'700',fontSize:'0.78rem',background:sub===t.id?'white':'transparent',color:sub===t.id?'#1a2340':'#6b7280',boxShadow:sub===t.id?'0 1px 6px rgba(0,0,0,0.1)':'none'}}>
+          {t.icon} {t.label}
+        </button>
+      ))}
+    </div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}>
+      <span style={{fontWeight:'800',color:'#1a2340',fontSize:'0.88rem'}}>{isSupplier?'تجار الجملة':'المحلات التجارية'}</span>
+      <button onClick={()=>{setShowForm(!showForm);setEditId(null);setForm({name:'',phone:''});}} style={S.addBtn}>{showForm?'✕ إلغاء':`+ ${isSupplier?'مورد':'محل'} جديد`}</button>
+    </div>
+    {showForm&&<div style={S.formCard}>
+      <div style={{fontWeight:'800',color:'#1a2340',marginBottom:'12px',fontSize:'0.9rem'}}>{editId?'تعديل':'إضافة'} {isSupplier?'مورد':'محل'}</div>
+      <Field label="الاسم *" value={form.name} onChange={v=>setForm(p=>({...p,name:v}))} placeholder={isSupplier?'اسم المورد':'اسم المحل'}/>
+      <Field label="رقم الهاتف (اختياري)" value={form.phone} onChange={v=>setForm(p=>({...p,phone:v}))} type="tel" placeholder="05xxxxxxxx"/>
+      <button onClick={handleSave} style={S.saveBtn}>💾 حفظ</button>
+    </div>}
+    {list.length===0&&!showForm&&<Empty msg={isSupplier?'لا يوجد موردون بعد.':'لا توجد محلات بعد.'}/>}
+    {list.map(item=>{
+      const debt=getDebt(item.id);const count=txCount(item.id);
+      return <div key={item.id} style={{...S.itemCard,borderRight:`3px solid ${debt>0?(isSupplier?'#dc2626':'#059669'):'#10b981'}`}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+          <div>
+            <div style={{fontWeight:'800',color:'#1a2340',fontSize:'0.9rem'}}>{item.name}</div>
+            {item.phone&&<div style={{fontSize:'0.7rem',color:'#6b7280',marginTop:'1px'}}>📞 {item.phone}</div>}
+            <div style={{fontSize:'0.7rem',color:'#a0aec0',marginTop:'1px'}}>{count} معاملة</div>
+          </div>
+          <div style={{textAlign:'left'}}>
+            {debt>0?<><div style={{fontSize:'0.65rem',color:'#6b7280'}}>{isSupplier?'أدفع لهم':'يدفعون لي'}</div><div style={{fontWeight:'900',fontSize:'0.95rem',color:isSupplier?'#dc2626':'#059669'}}>{fmtNum(debt)} دج</div></>:<Badge text="✓ تسوية" color="#059669" bg="#d1fae5"/>}
+          </div>
+        </div>
+        <div style={{marginTop:'8px'}}>
+          {debt>0&&payFor===item.id?<div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+            <div style={{display:'flex',gap:'6px'}}>
+              <input type="number" placeholder="المبلغ (دج)" value={payAmt} onChange={e=>setPayAmt(e.target.value)} style={{...S.input,flex:1}}/>
+              <button onClick={()=>handlePayment(item.id)} style={S.greenBtn}>{isSupplier?'دفع':'تحصيل'}</button>
+            </div>
+            <div style={{display:'flex',gap:'6px'}}>
+              <input placeholder="ملاحظة..." value={payNote} onChange={e=>setPayNote(e.target.value)} style={{...S.input,flex:1}}/>
+              <button onClick={()=>setPayFor(null)} style={S.editBtn}>إلغاء</button>
+            </div>
+          </div>:<div style={{display:'flex',gap:'6px',flexWrap:'wrap'}}>
+            {debt>0&&<button onClick={()=>{setPayFor(item.id);setPayAmt('');setPayNote('');}} style={S.greenBtn}>{isSupplier?'💸 دفع دين':'💰 تحصيل دين'}</button>}
+            <button onClick={()=>startEdit(item)} style={S.editBtn}>✏️</button>
+            <button onClick={()=>del(item.id)} style={S.delBtn}>🗑️</button>
+          </div>}
+        </div>
+      </div>;
+    })}
+  </div>;
+}
+
+// ══════════════════════ EXPENSES ══════════════════════
+function Expenses({expenses,saveExpenses}){
+  const [showForm,setShowForm]=useState(false);
+  const [form,setForm]=useState({category:'fuel',amount:'',date:todayInput(),note:''});
+  const labels={fuel:'وقود',transport:'نقل',packaging:'تغليف',other:'أخرى'};
+  const reset=()=>{setForm({category:'fuel',amount:'',date:todayInput(),note:''});setShowForm(false);};
+  const add=()=>{
+    const amount=+form.amount;
+    if(!amount||amount<=0)return alert('أدخل مبلغاً صحيحاً');
+    saveExpenses([...expenses,{id:uid(),...form,amount,date:new Date(`${form.date}T12:00:00`).toISOString()}]);
+    reset();
+  };
+  const currentMonth=new Date().toISOString().slice(0,7);
+  const monthly=expenses.filter(e=>String(e.date).slice(0,7)===currentMonth).reduce((sum,e)=>sum+e.amount,0);
+  return <div style={{padding:'14px'}}>
+    <div style={{background:'linear-gradient(135deg,#7c3aed,#5b21b6)',color:'white',borderRadius:'12px',padding:'12px 16px',marginBottom:'12px',display:'flex',justifyContent:'space-between'}}><span style={{fontSize:'0.78rem'}}>مصاريف هذا الشهر</span><strong>{fmtNum(monthly)} دج</strong></div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}><span style={{fontWeight:'800',color:'#1a2340'}}>المصاريف</span><button onClick={()=>setShowForm(!showForm)} style={S.addBtn}>{showForm?'✕ إلغاء':'+ مصروف'}</button></div>
+    {showForm&&<div style={S.formCard}>
+      <SelectField label="نوع المصروف" value={form.category} onChange={v=>setForm({...form,category:v})}>{Object.entries(labels).map(([id,label])=><option key={id} value={id}>{label}</option>)}</SelectField>
+      <Field label="المبلغ (دج) *" value={form.amount} onChange={v=>setForm({...form,amount:v})} type="number" placeholder="0"/>
+      <Field label="التاريخ *" value={form.date} onChange={v=>setForm({...form,date:v})} type="date"/>
+      <Field label="ملاحظة" value={form.note} onChange={v=>setForm({...form,note:v})} placeholder="مثلاً تعبئة وقود"/>
+      <button onClick={add} style={S.saveBtn}>💾 حفظ المصروف</button>
+    </div>}
+    {[...expenses].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(e=><div key={e.id} style={S.itemCard}><div style={{display:'flex',justifyContent:'space-between'}}><div><strong style={{fontSize:'0.86rem',color:'#1a2340'}}>{labels[e.category]||'مصروف'}</strong><div style={{fontSize:'0.7rem',color:'#6b7280'}}>{fmtDate(e.date)}{e.note&&` · ${e.note}`}</div></div><strong style={{color:'#7c3aed'}}>{fmtNum(e.amount)} دج</strong></div><button onClick={()=>{if(confirm('حذف هذا المصروف؟'))saveExpenses(expenses.filter(x=>x.id!==e.id));}} style={{...S.delBtn,marginTop:'7px'}}>🗑️</button></div>)}
+    {!expenses.length&&!showForm&&<Empty msg="لا توجد مصاريف مسجلة بعد."/>}
+  </div>;
+}
+
+// ══════════════════════ BACKUP ══════════════════════
+function Backup({products,suppliers,clients,purchases,sales,payments,expenses,settings,saveProducts,saveSuppliers,saveClients,savePurchases,saveSales,savePayments,saveExpenses,saveSettings}){
+  const [message,setMessage]=useState('');
+  const [business,setBusiness]=useState(settings);
+  const saveBusiness=()=>{saveSettings(business);setMessage('تم حفظ بيانات النشاط.');};
+  const exportData=()=>{
+    const data={version:1,exportedAt:new Date().toISOString(),products,suppliers,clients,purchases,sales,payments,expenses,settings};
+    const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+    const a=document.createElement('a');
+    a.href=url;a.download=`mohaz-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();
+    URL.revokeObjectURL(url);
+    setMessage('تم تنزيل نسخة احتياطية من بياناتك.');
+  };
+  const importData=e=>{
+    const file=e.target.files?.[0];
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=event=>{
+      try{
+        const data=JSON.parse(event.target.result);
+        if(!window.confirm('سيتم استبدال البيانات الحالية بالنسخة الاحتياطية. هل تريد المتابعة؟'))return;
+        saveProducts(Array.isArray(data.products)?data.products:[]);
+        saveSuppliers(Array.isArray(data.suppliers)?data.suppliers:[]);
+        saveClients(Array.isArray(data.clients)?data.clients:[]);
+        savePurchases(Array.isArray(data.purchases)?data.purchases:[]);
+        saveSales(Array.isArray(data.sales)?data.sales:[]);
+        savePayments(Array.isArray(data.payments)?data.payments:[]);
+        saveExpenses(Array.isArray(data.expenses)?data.expenses:[]);
+        saveSettings(data.settings&&typeof data.settings==='object'?data.settings:business);
+        setMessage('تمت استعادة النسخة الاحتياطية بنجاح.');
+      }catch{setMessage('تعذر قراءة الملف. اختر ملف نسخة احتياطية صالحاً.');}
+    };
+    reader.readAsText(file);
+    e.target.value='';
+  };
+  return <div style={{padding:'14px'}}>
+    <div style={{...S.formCard,padding:'18px'}}>
+      <div style={{fontWeight:'900',color:'#1a2340',fontSize:'1rem',marginBottom:'10px'}}>🏪 بيانات النشاط</div>
+      <Field label="اسم النشاط أو اسمك" value={business.businessName||''} onChange={v=>setBusiness({...business,businessName:v})} placeholder="يظهر في الفواتير"/>
+      <Field label="رقم الهاتف" value={business.phone||''} onChange={v=>setBusiness({...business,phone:v})} type="tel" placeholder="05xxxxxxxx"/>
+      <button onClick={saveBusiness} style={S.saveBtn}>💾 حفظ الإعدادات</button>
+    </div>
+    <div style={{...S.formCard,padding:'18px'}}>
+      <div style={{fontWeight:'900',color:'#1a2340',fontSize:'1rem',marginBottom:'6px'}}>💾 النسخ الاحتياطي</div>
+      <p style={{fontSize:'0.76rem',color:'#5a6a8a',lineHeight:1.9,margin:'0 0 14px'}}>بياناتك محفوظة على هذا الجهاز. نزّل نسخة احتياطية قبل تغيير الهاتف أو مسح بيانات المتصفح.</p>
+      <button onClick={exportData} style={S.saveBtn}>⬇️ تنزيل نسخة احتياطية</button>
+      <label style={{...S.editBtn,display:'block',textAlign:'center',padding:'10px',marginTop:'8px',cursor:'pointer'}}>⬆️ استعادة نسخة احتياطية<input type="file" accept="application/json,.json" onChange={importData} style={{display:'none'}}/></label>
+      {message&&<div style={{marginTop:'12px',fontSize:'0.75rem',fontWeight:'700',color:'#059669'}}>{message}</div>}
+    </div>
+    <div style={{fontSize:'0.7rem',color:'#7c879d',textAlign:'center',padding:'10px'}}>إصدار التطبيق 1.0 · يعمل دون حساب أو خادم</div>
+  </div>;
+}
+
+// ══════════════════════ MAIN ══════════════════════
+function App(){
+  const [tab,setTab]=useState('dashboard');
+  const [products,setProducts]=useState(()=>load(KEYS.products));
+  const [suppliers,setSuppliers]=useState(()=>load(KEYS.suppliers));
+  const [clients,setClients]=useState(()=>load(KEYS.clients));
+  const [purchases,setPurchases]=useState(()=>load(KEYS.purchases));
+  const [sales,setSales]=useState(()=>load(KEYS.sales));
+  const [payments,setPayments]=useState(()=>load(KEYS.payments));
+  const [expenses,setExpenses]=useState(()=>load(KEYS.expenses));
+  const [settings,setSettings]=useState(()=>{const value=load(KEYS.settings);return value&&typeof value==='object'&&!Array.isArray(value)?value:{businessName:'',phone:''};});
+
+  const saveProducts=d=>{setProducts(d);save(KEYS.products,d);};
+  const saveSuppliers=d=>{setSuppliers(d);save(KEYS.suppliers,d);};
+  const saveClients=d=>{setClients(d);save(KEYS.clients,d);};
+  const savePurchases=d=>{setPurchases(d);save(KEYS.purchases,d);};
+  const saveSales=d=>{setSales(d);save(KEYS.sales,d);};
+  const savePayments=d=>{setPayments(d);save(KEYS.payments,d);};
+  const saveExpenses=d=>{setExpenses(d);save(KEYS.expenses,d);};
+  const saveSettings=d=>{setSettings(d);save(KEYS.settings,d);};
+
+  const supplierDebt=supId=>{
+    const fromP=purchases.filter(p=>p.supplierId===supId).reduce((s,p)=>s+(p.total-p.paid),0);
+    const fromPay=payments.filter(p=>p.type==='to_supplier'&&p.entityId===supId).reduce((s,p)=>s+p.amount,0);
+    return fromP-fromPay;
+  };
+  const clientDebt=cliId=>{
+    const fromS=sales.filter(s=>s.clientId===cliId).reduce((s,sa)=>s+(sa.total-sa.collected),0);
+    const fromPay=payments.filter(p=>p.type==='from_client'&&p.entityId===cliId).reduce((s,p)=>s+p.amount,0);
+    return fromS-fromPay;
+  };
+  const totalSupplierDebt=suppliers.reduce((s,sup)=>s+Math.max(0,supplierDebt(sup.id)),0);
+  const totalClientDebt=clients.reduce((s,c)=>s+Math.max(0,clientDebt(c.id)),0);
+  const productStock=pid=>{
+    const pr=products.find(p=>p.id===pid);
+    const init=pr?.initialStock||0;
+    const bought=purchases.flatMap(p=>p.items).filter(i=>i.productId===pid).reduce((s,i)=>s+i.qty,0);
+    const sold=sales.flatMap(s=>s.items).filter(i=>i.productId===pid).reduce((s,i)=>s+i.qty,0);
+    return init+bought-sold;
+  };
+  const grossProfit=sales.flatMap(s=>s.items).reduce((acc,item)=>{
+    const pr=products.find(p=>p.id===item.productId);
+    const cost=item.costPrice??pr?.costPrice??0;
+    return acc+(item.unitPrice-cost)*item.qty;
+  },0);
+  const monthlyExpenses=expenses.filter(e=>String(e.date).slice(0,7)===new Date().toISOString().slice(0,7)).reduce((sum,e)=>sum+e.amount,0);
+  const netProfit=grossProfit-monthlyExpenses;
+  const unpaidPurchases=purchases.filter(p=>p.total-p.paid>0).length;
+  const unpaidSales=sales.filter(s=>s.total-s.collected>0).length;
+  const shared={products,suppliers,clients,purchases,sales,payments,expenses,settings,saveProducts,saveSuppliers,saveClients,savePurchases,saveSales,savePayments,saveExpenses,saveSettings,supplierDebt,clientDebt,productStock};
+  const tabs=[{id:'dashboard',icon:'🏠',label:'الرئيسية',badge:0},{id:'products',icon:'📦',label:'المنتجات',badge:0},{id:'purchases',icon:'🛒',label:'الشراء',badge:unpaidPurchases},{id:'sales',icon:'💰',label:'البيع',badge:unpaidSales},{id:'contacts',icon:'👥',label:'الاتصال',badge:0},{id:'expenses',icon:'⛽',label:'مصاريف',badge:0},{id:'backup',icon:'⚙️',label:'الإعدادات',badge:0}];
+
+  return <div dir="rtl" style={{fontFamily:"'Cairo',sans-serif",background:'#f4f6fb',minHeight:'100vh',maxWidth:'430px',margin:'0 auto',position:'relative',paddingBottom:'72px'}}>
+    {/* HEADER */}
+    <div style={{background:'linear-gradient(135deg,#1a2340 0%,#2d3e6e 100%)',padding:'14px 18px 13px',color:'white',position:'sticky',top:0,zIndex:50,boxShadow:'0 2px 16px rgba(26,35,64,0.3)'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div>
+          <div style={{fontSize:'1.15rem',fontWeight:'900'}}>🍯 {settings.businessName||'موزع الحلويات'}</div>
+          <div style={{fontSize:'0.65rem',opacity:0.55,marginTop:'1px'}}>نظام إدارة التوزيع</div>
+        </div>
+        <div style={{textAlign:'left',fontSize:'0.7rem',opacity:0.75}}>
+          <div style={{color:'#f87171'}}>ديوني: {fmtNum(totalSupplierDebt)} دج</div>
+          <div style={{color:'#4ade80'}}>لي: {fmtNum(totalClientDebt)} دج</div>
+        </div>
+      </div>
+    </div>
+
+    {/* CONTENT */}
+    <div style={{overflowY:'auto',height:'calc(100vh - 52px - 64px)'}}>
+      {tab==='dashboard'&&<Dashboard {...shared} totalSupplierDebt={totalSupplierDebt} totalClientDebt={totalClientDebt} netProfit={netProfit} monthlyExpenses={monthlyExpenses} setTab={setTab}/>}
+      {tab==='products'&&<Products {...shared}/>}
+      {tab==='purchases'&&<Purchases {...shared}/>}
+      {tab==='sales'&&<Sales {...shared}/>}
+      {tab==='contacts'&&<Contacts {...shared}/>}
+      {tab==='expenses'&&<Expenses {...shared}/>}
+      {tab==='backup'&&<Backup {...shared}/>}
+    </div>
+
+    {/* BOTTOM NAV */}
+    <nav style={{position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:'430px',background:'white',borderTop:'1px solid #e8ecf4',display:'flex',boxShadow:'0 -4px 24px rgba(0,0,0,0.09)',zIndex:100}}>
+      {tabs.map(t=>(
+        <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:'10px 0 8px',background:'none',border:'none',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:'2px',color:tab===t.id?'#f59e0b':'#9ca3af',fontFamily:'Cairo,sans-serif',position:'relative'}}>
+          <span style={{fontSize:'1.25rem',lineHeight:1}}>{t.icon}</span>
+          <span style={{fontSize:'0.6rem',fontWeight:tab===t.id?'800':'500'}}>{t.label}</span>
+          {t.badge>0&&<span style={{position:'absolute',top:'6px',right:'50%',transform:'translateX(8px)',background:'#dc2626',color:'white',borderRadius:'20px',fontSize:'0.58rem',fontWeight:'800',padding:'1px 5px',minWidth:'16px',textAlign:'center'}}>{t.badge}</span>}
+        </button>
+      ))}
+    </nav>
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+    // Register Service Worker for PWA support
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js')
+          .catch(err => console.error('SW registration failed:', err));
+      });
+    }
+</script>
+</body>
+</html>
+
