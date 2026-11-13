@@ -31,3 +31,14 @@ create policy "Users can delete their own app state"
 
 grant select, insert, update, delete on public.app_states to authenticated;
 
+-- Enable realtime notifications so other phones receive changes automatically.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'app_states'
+  ) then
+    alter publication supabase_realtime add table public.app_states;
+  end if;
+end $$;
+
