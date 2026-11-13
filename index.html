@@ -546,9 +546,14 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
     const url=cloudUrl.trim().replace(/\/$/,'');
     const key=cloudKey.trim();
     const config=`${url}|${key}`;
-    if(!clientRef.current||clientConfigRef.current!==config){
+    if(window.__mohazSupabaseClient&&window.__mohazSupabaseConfig===config){
+      clientRef.current=window.__mohazSupabaseClient;
+      clientConfigRef.current=config;
+    }else if(!clientRef.current||clientConfigRef.current!==config){
       clientRef.current=window.supabase.createClient(url,key);
       clientConfigRef.current=config;
+      window.__mohazSupabaseClient=clientRef.current;
+      window.__mohazSupabaseConfig=config;
     }
     return clientRef.current;
   };
