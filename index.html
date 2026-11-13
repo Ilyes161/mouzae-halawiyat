@@ -538,8 +538,11 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
   const [cloudBusy,setCloudBusy]=useState(false);
   const [session,setSession]=useState(null);
   const [syncReady,setSyncReady]=useState(false);
+  const [syncStatus,setSyncStatus]=useState('غير متصل');
   const clientRef=useRef(null);
   const clientConfigRef=useRef('');
+  const lastCloudUpdateRef=useRef('');
+  const skipNextUploadRef=useRef(false);
   const saveBusiness=()=>{saveSettings(business);setMessage('تم حفظ بيانات النشاط.');};
   const cloudClient=()=>{
     if(!cloudUrl||!cloudKey||!window.supabase)return null;
@@ -583,21 +586,26 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
     if(!client)return setMessage('أدخل إعدادات Supabase أولاً.');
     setCloudBusy(true);const {data:{user}}=await client.auth.getUser();
     if(!user){setCloudBusy(false);return setMessage('سجّل الدخول أولاً.');}
-    const {error}=await client.from('app_states').upsert({user_id:user.id,payload:cloudPayload(),updated_at:new Date().toISOString()});
-    setCloudBusy(false);if(!silent)setMessage(error?'فشل رفع البيانات: '+error.message:'تم رفع نسخة البيانات إلى السحابة.');
+    const updatedAt=new Date().toISOString();
+    const {error}=await client.from('app_states').upsert({user_id:user.id,payload:cloudPayload(),updated_at:updatedAt});
+    setCloudBusy(false);
+    if(error){setSyncStatus('تعذر رفع التغييرات ⚠️');if(!silent)setMessage('فشل رفع البيانات: '+error.message);}
+    else{lastCloudUpdateRef.current=updatedAt;setSyncStatus('متزامن ✓');if(!silent)setMessage('تمت مزامنة البيانات.');}
   };
   const downloadCloud=async(silent=false)=>{
     const client=cloudClient();
     if(!client)return setMessage('أدخل إعدادات Supabase أولاً.');
     setCloudBusy(true);const {data:{user}}=await client.auth.getUser();
     if(!user){setCloudBusy(false);return setMessage('سجّل الدخول أولاً.');}
-    const {data,error}=await client.from('app_states').select('payload').eq('user_id',user.id).maybeSingle();
+    const {data,error}=await client.from('app_states').select('payload,updated_at').eq('user_id',user.id).maybeSingle();
     setCloudBusy(false);
     if(error)return setMessage('فشل تنزيل البيانات: '+error.message);
-    if(!data?.payload)return setMessage('لا توجد نسخة سحابية بعد.');
+    if(!data?.payload){setSyncStatus('لا توجد نسخة سحابية بعد');return setMessage('لا توجد نسخة سحابية بعد.');}
     if(!silent&&!window.confirm('سيتم استبدال البيانات المحلية بالنسخة السحابية. هل تريد المتابعة؟'))return;
     const payload=data.payload;
-    saveProducts(Array.isArray(payload.products)?payload.products:[]);saveSuppliers(Array.isArray(payload.suppliers)?payload.suppliers:[]);saveClients(Array.isArray(payload.clients)?payload.clients:[]);savePurchases(Array.isArray(payload.purchases)?payload.purchases:[]);saveSales(Array.isArray(payload.sales)?payload.sales:[]);savePayments(Array.isArray(payload.payments)?payload.payments:[]);saveExpenses(Array.isArray(payload.expenses)?payload.expenses:[]);setMessage('تمت استعادة البيانات من السحابة.');
+    lastCloudUpdateRef.current=data.updated_at||'';
+    skipNextUploadRef.current=true;
+    saveProducts(Array.isArray(payload.products)?payload.products:[]);saveSuppliers(Array.isArray(payload.suppliers)?payload.suppliers:[]);saveClients(Array.isArray(payload.clients)?payload.clients:[]);savePurchases(Array.isArray(payload.purchases)?payload.purchases:[]);saveSales(Array.isArray(payload.sales)?payload.sales:[]);savePayments(Array.isArray(payload.payments)?payload.payments:[]);saveExpenses(Array.isArray(payload.expenses)?payload.expenses:[]);setSyncStatus('متزامن ✓');setMessage('تمت استعادة البيانات من السحابة.');
   };
   useEffect(()=>{
     const client=cloudClient();if(!client)return;
@@ -608,9 +616,23 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
   },[]);
   useEffect(()=>{
     if(!session||!syncReady)return;
+    if(skipNextUploadRef.current){skipNextUploadRef.current=false;return;}
     const timer=setTimeout(()=>uploadCloud(true),1200);
     return ()=>clearTimeout(timer);
   },[session,syncReady,products,suppliers,clients,purchases,sales,payments,expenses,settings]);
+  useEffect(()=>{
+    const userId=session?.user?.id;
+    const client=cloudClient();
+    if(!userId||!client)return;
+    const channel=client.channel(`mouzae-sync-${userId}`).on('postgres_changes',{event:'UPDATE',schema:'public',table:'app_states',filter:`user_id=eq.${userId}`},async payload=>{
+      if(payload.new?.updated_at===lastCloudUpdateRef.current)return;
+      setSyncStatus('جارٍ استقبال التحديث...');
+      await downloadCloud(true);
+    }).subscribe();
+    const refresh=()=>{if(document.visibilityState==='visible')downloadCloud(true);};
+    document.addEventListener('visibilitychange',refresh);
+    return ()=>{document.removeEventListener('visibilitychange',refresh);client.removeChannel(channel);};
+  },[session?.user?.id]);
   const exportData=()=>{
     const data={version:1,exportedAt:new Date().toISOString(),products,suppliers,clients,purchases,sales,payments,expenses,settings};
     const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
@@ -651,6 +673,7 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
     <div style={{...S.formCard,padding:'18px'}}>
       <div style={{fontWeight:'900',color:'#1a2340',fontSize:'1rem',marginBottom:'6px'}}>☁️ المزامنة السحابية</div>
       <div style={{fontSize:'0.72rem',color:'#5a6a8a',lineHeight:1.8,marginBottom:'10px'}}>الاتصال السحابي مضبوط تلقائيًا. بيانات الاتصال مخفية ومحفوظة داخل التطبيق.</div>
+      <div style={{background:syncStatus.includes('✓')?'#d1fae5':'#fef3c7',color:syncStatus.includes('✓')?'#047857':'#92400e',borderRadius:'8px',padding:'8px 10px',fontSize:'0.75rem',fontWeight:'800',marginBottom:'10px'}}>حالة المزامنة: {syncStatus}</div>
       <Field label="البريد الإلكتروني" value={email} onChange={setEmail} type="email" placeholder="you@example.com"/>
       <Field label="كلمة المرور" value={password} onChange={setPassword} type="password" placeholder="••••••••"/>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'7px'}}>
@@ -658,10 +681,7 @@ function Backup({products,suppliers,clients,purchases,sales,payments,expenses,se
         <button disabled={cloudBusy} onClick={()=>signIn(true)} style={S.editBtn}>إنشاء حساب</button>
       </div>
       <button disabled={cloudBusy} onClick={resendConfirmation} style={{...S.editBtn,width:'100%',marginTop:'8px'}}>✉️ إعادة إرسال رسالة التأكيد</button>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'7px',marginTop:'8px'}}>
-        <button disabled={cloudBusy} onClick={uploadCloud} style={S.saveBtn}>⬆️ رفع البيانات</button>
-        <button disabled={cloudBusy} onClick={downloadCloud} style={{...S.saveBtn,background:'#2563eb'}}>⬇️ استعادة البيانات</button>
-      </div>
+      <div style={{fontSize:'0.7rem',color:'#5a6a8a',lineHeight:1.7,marginTop:'9px'}}>بعد تسجيل الدخول، كل تغيير يُرفع تلقائيًا ويصل إلى الأجهزة الأخرى فورًا.</div>
     </div>
     <div style={{...S.formCard,padding:'18px'}}>
       <div style={{fontWeight:'900',color:'#1a2340',fontSize:'1rem',marginBottom:'6px'}}>💾 النسخ الاحتياطي</div>
